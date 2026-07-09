@@ -23,6 +23,7 @@ set_target_properties(cuctmc PROPERTIES
 
 target_sources(cuctmc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/main.cpp
+    ${CMAKE_SOURCE_DIR}/src/cme.cpp
     ${CMAKE_SOURCE_DIR}/src/cuda.cu
 )
 
