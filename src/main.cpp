@@ -25,11 +25,11 @@ int main(void)
     };
 
     std::vector<double> rates = {
-        0.7 / 1000, 
+        0.7 / 1000.0f, 
         1.5 * 25, 
         1.5,
         1.7, 
-        4 / 1000
+        4 / 1000.0f
     };
 
     ChemicalMasterEquation buddingCTMC(alpha, beta, rates);
@@ -39,7 +39,7 @@ int main(void)
     };
 
     int paths = 256;
-    int steps = 1 << 16;
+    int steps = 200000;
 
     dataOut output = stochasticSimulation(buddingCTMC.get_d_alpha(),
                                           buddingCTMC.get_d_trans(),
@@ -49,24 +49,28 @@ int main(void)
                                           rates.size(),
                                           paths, steps);
 
-    std::ofstream file("path_0.csv");
+    std::ofstream file("paths.csv");
     if (file.is_open()) {
         size_t reactants = start.size();
 
-        file << "step,time";
-        for (size_t r = 0; r < reactants; r++) file << ",reactant_" << r;
+        file << "path,step,time";
+        for (size_t r = 0; r < reactants; r++) {
+            file << ",reactant_" << r;
+        }
         file << "\n";
 
-        for (size_t step = 0; step < output.paths[0].size(); step++) {
-            file << step << "," << output.times[0][step];
-            for (size_t r = 0; r < reactants; r++) {
-                file << "," << output.paths[0][step][r];
+        for (size_t path = 0; path < output.paths.size(); path++) {
+            for (size_t step = 0; step < output.paths[path].size(); step++) {
+                file << path << "," << step << "," << output.times[path][step];
+                for (size_t r = 0; r < reactants; r++) {
+                    file << "," << output.paths[path][step][r];
+                }
+                file << "\n";
             }
-            file << "\n";
         }
         file.close();
     } else {
-        std::cerr << "Failed to open path_0.csv for writing\n";
+        std::cerr << "Failed to open paths.csv for writing\n";
     }
         
     return 0;
