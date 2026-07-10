@@ -88,8 +88,8 @@ dataOut stochasticSimulation(ReactionNetwork cme) {
     int n_transitionCoefficients = cme.transitionCoefficients.size();
     int n_initialConditions = cme.reactants.size();
 
-    int n_timePointStorage = cme.samplePaths * (cme.simulationSteps + 1);
-    int n_samplePathsStorage = n_timePointStorage * n_initialConditions;
+    int n_timePoints = cme.samplePaths * (cme.simulationSteps + 1);
+    int n_samplePaths = n_timePoints * n_initialConditions;
     
     //  malloc buffers
     
@@ -98,8 +98,8 @@ dataOut stochasticSimulation(ReactionNetwork cme) {
     cudaMallocManaged(&d_transitionCoefficients, n_transitionCoefficients * sizeof(int));
     cudaMallocManaged(&d_initialConditions, n_initialConditions * sizeof(int));
 
-    cudaMallocManaged(&d_timePoints, n_timePointStorage * sizeof(double));
-    cudaMallocManaged(&d_samplePaths, n_samplePathsStorage * sizeof(int));
+    cudaMallocManaged(&d_timePoints, n_timePoints * sizeof(double));
+    cudaMallocManaged(&d_samplePaths, n_samplePaths * sizeof(int));
 
     //  memcpy to gpu
 
@@ -108,24 +108,22 @@ dataOut stochasticSimulation(ReactionNetwork cme) {
     memcpy(d_transitionCoefficients, cme.transitionCoefficients.data(), n_transitionCoefficients * sizeof(int));
     memcpy(d_initialConditions, cme.initialConditions.data(), n_initialConditions * sizeof(int));
 
-    // get device
+    //  prefetches
 
     int device;
     cudaGetDevice(&device);
 
-    cudaMemLocation memloc;
-    memloc.id = device;
-    memloc.type = cudaMemLocationTypeDevice;
+    cudaMemLocation memlocDev;
+    memlocDev.id = device;
+    memlocDev.type = cudaMemLocationTypeDevice;
 
-    //  prefetches
+    cudaMemPrefetchAsync(d_reactionRates, n_reactionRates * sizeof(double), memlocDev, 0);
+    cudaMemPrefetchAsync(d_reactantCoefficients, n_reactantCoefficients * sizeof(int), memlocDev, 0);
+    cudaMemPrefetchAsync(d_transitionCoefficients, n_transitionCoefficients * sizeof(int), memlocDev, 0);
+    cudaMemPrefetchAsync(d_initialConditions, n_initialConditions * sizeof(int), memlocDev, 0);
 
-    cudaMemPrefetchAsync(d_reactionRates, n_reactionRates * sizeof(double), memloc, 0);
-    cudaMemPrefetchAsync(d_reactantCoefficients, n_reactantCoefficients * sizeof(int), memloc, 0);
-    cudaMemPrefetchAsync(d_transitionCoefficients, n_transitionCoefficients * sizeof(int), memloc, 0);
-    cudaMemPrefetchAsync(d_initialConditions, n_initialConditions * sizeof(int), memloc, 0);
-
-    cudaMemPrefetchAsync(d_timePoints, n_timePointStorage * sizeof(double), memloc, 0);
-    cudaMemPrefetchAsync(d_samplePaths, n_samplePathsStorage * sizeof(int), memloc, 0);
+    cudaMemPrefetchAsync(d_timePoints, n_timePoints * sizeof(double), memlocDev, 0);
+    cudaMemPrefetchAsync(d_samplePaths, n_samplePaths * sizeof(int), memlocDev, 0);
 
     //  kernel launch
 
@@ -134,6 +132,15 @@ dataOut stochasticSimulation(ReactionNetwork cme) {
     cuSSA<<<numBlocks, blockSize>>>(cme.reactants.size(), cme.reactions.size(), cme.samplePaths, 
         cme.simulationSteps, d_reactionRates, d_reactantCoefficients, d_transitionCoefficients, 
         d_initialConditions, d_timePoints, d_samplePaths);
+
+    //  more prefetches
+
+    cudaMemLocation memlocHost;
+    memlocHost.id = 0;
+    memlocHost.type = cudaMemLocationTypeHost;
+    
+    cudaMemPrefetchAsync(d_timePoints, n_timePoints * sizeof(double), memlocHost, 0);
+    cudaMemPrefetchAsync(d_samplePaths, n_samplePaths * sizeof(int), memlocHost, 0);
 
     cudaDeviceSynchronize();
 
