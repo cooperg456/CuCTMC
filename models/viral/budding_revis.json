@@ -1,0 +1,51 @@
+{
+  "reactants" : ["H", "V", "I"],
+  "reactions" : [
+    {
+      "name" : "\\beta", 
+      "rate" : 0.0007, 
+      "reactants" : {
+        "V" : 1, 
+        "H" : 1
+      }, 
+      "products" : {
+        "I" : 1
+      }
+    },
+    {
+      "name" : "\\gamma", 
+      "rate" : 0.0015, 
+      "reactants" : {
+        "H" : 1,
+        "I" : 1
+      }, 
+      "products" : {
+        "H" : 2
+      }
+    },
+    {
+      "name" : "\\omega", 
+      "rate" : 37.5, 
+      "reactants" : {
+        "I" : 1
+      }, 
+      "products" : {
+        "V" : 1, 
+        "I" : 1
+      }
+    },
+    {
+      "name" : "\\delta", 
+      "rate" : 1.7, 
+      "reactants" : {
+        "V" : 1
+      }, 
+      "products" : {}
+    }
+  ],
+  "defaultParameters" : {
+    "initialConditions" : [1000, 3, 0],
+    "simulationSteps" : 250000,
+    "samplePaths" : 256
+  }
+}

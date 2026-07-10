@@ -4,8 +4,10 @@
 #include "curand_kernel.h"
 
 __global__
-void cuSSA(int reactants, int reactions, int paths, int steps, int* d_alpha, 
-           int* d_trans, double* d_rates, int* d_conds, int* d_paths, double* d_times) {
+void cuSSA(int reactants, int reactions, int paths, 
+    int steps, double* d_rates, int* d_alpha, int* d_trans, 
+    int* d_conds,  double* d_times, int* d_paths) {
+
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     int stride = blockDim.x * gridDim.x;
 
@@ -72,10 +74,42 @@ void cuSSA(int reactants, int reactions, int paths, int steps, int* d_alpha,
     }
 }
 
-dataOut stochasticSimulation(int* d_alpha, int* d_trans, double* d_rates, 
-                             int* initialConditions, int reactants, 
-                             int reactions, int paths, int steps) {
+dataOut stochasticSimulation(ReactionNetwork cme) {
+    double *d_reactionRates;
+    int *d_reactantCoefficients;
+    int *d_transitionCoefficients;
+    int *d_initialConditions;
+
+    double *d_timePoints;
+    int *d_samplePaths;
+
+    int n_reactionRates = cme.reactions.size();
+    int n_reactantCoefficients = cme.reactantCoefficients.size();
+    int n_transitionCoefficients = cme.transitionCoefficients.size();
+    int n_initialConditions = cme.reactants.size();
+
+    int n_timePointStorage = cme.samplePaths * (cme.simulationSteps + 1);
+    int n_samplePathsStorage = n_timePointStorage * n_initialConditions;
+    
+    //  malloc buffers
+    
+    cudaMallocManaged(&d_reactionRates, n_reactionRates * sizeof(double));
+    cudaMallocManaged(&d_reactantCoefficients, n_reactantCoefficients * sizeof(int));
+    cudaMallocManaged(&d_transitionCoefficients, n_transitionCoefficients * sizeof(int));
+    cudaMallocManaged(&d_initialConditions, n_initialConditions * sizeof(int));
+
+    cudaMallocManaged(&d_timePoints, n_timePointStorage * sizeof(double));
+    cudaMallocManaged(&d_samplePaths, n_samplePathsStorage * sizeof(int));
+
+    //  memcpy to gpu
+
+    memcpy(d_reactionRates, cme.reactionRates.data(), n_reactionRates * sizeof(double));
+    memcpy(d_reactantCoefficients, cme.reactantCoefficients.data(), n_reactantCoefficients * sizeof(int));
+    memcpy(d_transitionCoefficients, cme.transitionCoefficients.data(), n_transitionCoefficients * sizeof(int));
+    memcpy(d_initialConditions, cme.initialConditions.data(), n_initialConditions * sizeof(int));
+
     // get device
+
     int device;
     cudaGetDevice(&device);
 
@@ -83,38 +117,33 @@ dataOut stochasticSimulation(int* d_alpha, int* d_trans, double* d_rates,
     memloc.id = device;
     memloc.type = cudaMemLocationTypeDevice;
 
-    //  calculate mem requirements
-    int n_paths = paths * (steps + 1) * reactants;
-    int n_times = paths * (steps + 1);
-    int n_alpha = reactions * reactants;
-
-    //  malloc path and ic buffers
-    int *d_paths;
-    int *d_conds;
-    double *d_times;
-    cudaMallocManaged(&d_paths, n_paths * sizeof(int));
-    cudaMallocManaged(&d_times, n_times * sizeof(double));
-    cudaMallocManaged(&d_conds, reactants * sizeof(int));
-
-    memcpy(d_conds, initialConditions, reactants * sizeof(int));
-
     //  prefetches
-    cudaMemPrefetchAsync(d_alpha, n_alpha * sizeof(int), memloc, 0);
-    cudaMemPrefetchAsync(d_trans, n_alpha * sizeof(int), memloc, 0);
-    cudaMemPrefetchAsync(d_conds, reactants * sizeof(int), memloc, 0);
-    cudaMemPrefetchAsync(d_rates, reactions * sizeof(double), memloc, 0);
-    cudaMemPrefetchAsync(d_paths, n_paths * sizeof(int), memloc, 0);
-    cudaMemPrefetchAsync(d_times, n_times * sizeof(double), memloc, 0);
+
+    cudaMemPrefetchAsync(d_reactionRates, n_reactionRates * sizeof(double), memloc, 0);
+    cudaMemPrefetchAsync(d_reactantCoefficients, n_reactantCoefficients * sizeof(int), memloc, 0);
+    cudaMemPrefetchAsync(d_transitionCoefficients, n_transitionCoefficients * sizeof(int), memloc, 0);
+    cudaMemPrefetchAsync(d_initialConditions, n_initialConditions * sizeof(int), memloc, 0);
+
+    cudaMemPrefetchAsync(d_timePoints, n_timePointStorage * sizeof(double), memloc, 0);
+    cudaMemPrefetchAsync(d_samplePaths, n_samplePathsStorage * sizeof(int), memloc, 0);
 
     //  kernel launch
-    int blockSize = 256;
-    int numBlocks = (paths + blockSize - 1) / blockSize;
-    cuSSA<<<numBlocks, blockSize>>>(reactants, reactions, paths, steps, d_alpha, d_trans, d_rates, d_conds, d_paths, d_times);
 
-    //  device sync
+    int blockSize = 256;
+    int numBlocks = (cme.samplePaths + blockSize - 1) / blockSize;
+    cuSSA<<<numBlocks, blockSize>>>(cme.reactants.size(), cme.reactions.size(), cme.samplePaths, 
+        cme.simulationSteps, d_reactionRates, d_reactantCoefficients, d_transitionCoefficients, 
+        d_initialConditions, d_timePoints, d_samplePaths);
+
     cudaDeviceSynchronize();
 
     //  get data
+
+    int paths = cme.samplePaths;
+    int steps = cme.simulationSteps;
+    int reactions = cme.reactions.size();
+    int reactants = cme.reactants.size();
+    
     dataOut output{};
     output.paths.resize(paths, std::vector<std::vector<int>>(steps + 1, std::vector<int>(reactants)));
     output.times.resize(paths, std::vector<double>(steps + 1));
@@ -122,17 +151,23 @@ dataOut stochasticSimulation(int* d_alpha, int* d_trans, double* d_rates,
     for (size_t path = 0; path < paths; path++) {
         for (size_t step = 0; step < (steps + 1); step++) {
             memcpy(output.paths[path][step].data(),
-                d_paths + (path * (steps + 1) * reactants) + (step * reactants),
+                d_samplePaths + (path * (steps + 1) * reactants) + (step * reactants),
                 reactants * sizeof(int));
         }
-        memcpy(output.times[path].data(), d_times + (path * (steps + 1)), (steps + 1) * sizeof(double));
+        memcpy(output.times[path].data(), d_timePoints + (path * (steps + 1)), (steps + 1) * sizeof(double));
     }
 
     //  free paths buffer
-    cudaFree(d_paths);
-    cudaFree(d_times);
-    cudaFree(d_conds);
+
+    cudaFree(d_reactionRates);
+    cudaFree(d_reactantCoefficients);
+    cudaFree(d_transitionCoefficients);
+    cudaFree(d_initialConditions);
+
+    cudaFree(d_timePoints);
+    cudaFree(d_samplePaths);
 
     //  return
+
     return output;
 }

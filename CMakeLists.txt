@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
-project(CuCTMC LANGUAGES C CXX CUDA)
+project(CuCTMC LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,10 @@ set(CMAKE_CUDA_ARCHITECTURES all-major)
 
 
 
+option(INSTALL_MODELS "Install reaction network JSON files" OFF)
+
+
+
 add_executable(cuctmc)
 
 set_target_properties(cuctmc PROPERTIES 
@@ -23,7 +27,7 @@ set_target_properties(cuctmc PROPERTIES
 
 target_sources(cuctmc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/main.cpp
-    ${CMAKE_SOURCE_DIR}/src/cme.cpp
+    ${CMAKE_SOURCE_DIR}/src/ReactionNetwork.cpp
     ${CMAKE_SOURCE_DIR}/src/cuda.cu
 )
 
@@ -35,9 +39,17 @@ target_link_libraries(cuctmc PRIVATE
     CUDA::curand
 )
 
-install(TARGETS cuctmc 
-    RUNTIME DESTINATION bin
-)
+
+
+include(GNUInstallDirs)
+
+install(TARGETS cuctmc RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+if(INSTALL_MODELS)
+    install(DIRECTORY models/
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/cuctmc/models
+            FILES_MATCHING PATTERN "*.json")
+endif()
 
 
 

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vector>
+#include "ReactionNetwork.hpp"
 
 #define MAX_REACTANTS 16    //  fix this later
 #define MAX_REACTIONS 16
@@ -10,4 +10,4 @@ struct dataOut {
     std::vector<std::vector<double>> times{};
 };
 
-dataOut stochasticSimulation(int*, int*, double*, int*, int, int, int, int);
+dataOut stochasticSimulation(ReactionNetwork);

@@ -1,0 +1,51 @@
+{
+  "reactants" : ["H", "V", "I", "D"],
+  "reactions" : [
+    {
+      "name" : "\\gamma_{VH}", 
+      "rate" : 0.0007, 
+      "reactants" : {
+        "V" : 1, 
+        "H" : 1
+      }, 
+      "products" : {
+        "I" : 1
+      }
+    },
+    {
+      "name" : "a_I", 
+      "rate" : 1.5, 
+      "reactants" : {
+        "I" : 1
+      }, 
+      "products" : {
+        "V" : 25, 
+        "D" : 1
+      }
+    },
+    {
+      "name" : "a_V", 
+      "rate" : 1.7, 
+      "reactants" : {
+        "V" : 1
+      }, 
+      "products" : {}
+    },
+    {
+      "name" : "b_{HD}", 
+      "rate" : 0.004, 
+      "reactants" : {
+        "H" : 1, 
+        "D" : 1
+      }, 
+      "products" : {
+        "H" : 2
+      }
+    }
+  ],
+  "defaultParameters" : {
+    "initialConditions" : [1000, 3, 0, 0],
+    "simulationSteps" : 250000,
+    "samplePaths" : 256
+  }
+}
