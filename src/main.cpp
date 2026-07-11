@@ -1,7 +1,7 @@
 #include <iostream>
 #include <fstream>
 
-#include "cuda.cuh"
+#include "StochasticSimulation.cuh"
 #include "ReactionNetwork.hpp"
  
 int main(int argc, char *argv[]) {
@@ -9,33 +9,15 @@ int main(int argc, char *argv[]) {
 		throw std::runtime_error("json file not provided");
 	}
 
-    ReactionNetwork cme(argv[1]);
+    ReactionNetwork network(argv[1]);
 
-    dataOut output = stochasticSimulation(cme);
+    SSASimInfo info{};
+    info.initialConditions = {1000, 3, 0, 0};
+    info.samplePaths = 16;
+    info.maxSteps = 250000;
 
-    std::ofstream file("paths.csv");
-    if (file.is_open()) {
-        size_t reactants = cme.initialConditions.size();
+    SSASimOutput out = stochasticSimulation(network, info);
+    out.toCSV("output.csv");
 
-        file << "path,step,time";
-        for (size_t r = 0; r < reactants; r++) {
-            file << ",reactant_" << r;
-        }
-        file << "\n";
-
-        for (size_t path = 0; path < output.paths.size(); path++) {
-            for (size_t step = 0; step < output.paths[path].size(); step++) {
-                file << path << "," << step << "," << output.times[path][step];
-                for (size_t r = 0; r < reactants; r++) {
-                    file << "," << output.paths[path][step][r];
-                }
-                file << "\n";
-            }
-        }
-        file.close();
-    } else {
-        std::cerr << "Failed to open paths.csv for writing\n";
-    }
-        
     return 0;
 }

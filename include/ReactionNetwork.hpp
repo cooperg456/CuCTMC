@@ -17,11 +17,4 @@ public:
     std::vector<double> reactionRates{};
     std::vector<int> reactantCoefficients{};
     std::vector<int> transitionCoefficients{};
-
-    //  default simulation parameters
-
-    int samplePaths = 0;
-    int simulationSteps = 0;
-
-    std::vector<int> initialConditions{};
 };

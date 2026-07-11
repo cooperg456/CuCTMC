@@ -28,7 +28,7 @@ set_target_properties(cuctmc PROPERTIES
 target_sources(cuctmc PRIVATE
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/ReactionNetwork.cpp
-    ${CMAKE_SOURCE_DIR}/src/cuda.cu
+    ${CMAKE_SOURCE_DIR}/src/StochasticSimulation.cu
 )
 
 target_include_directories(cuctmc PRIVATE

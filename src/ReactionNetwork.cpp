@@ -49,8 +49,4 @@ ReactionNetwork::ReactionNetwork(const std::filesystem::path& jsonFile) {
             transitionCoefficients[i * n_reactants + j] += (int)product.value();
         }
     }
-
-    samplePaths = network["defaultParameters"]["samplePaths"];
-    simulationSteps = network["defaultParameters"]["simulationSteps"];
-    initialConditions = network["defaultParameters"]["initialConditions"].get<std::vector<int>>();
 }

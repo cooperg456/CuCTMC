@@ -42,10 +42,5 @@
       }, 
       "products" : {}
     }
-  ],
-  "defaultParameters" : {
-    "initialConditions" : [1000, 3, 0],
-    "simulationSteps" : 250000,
-    "samplePaths" : 256
-  }
+  ]
 }
