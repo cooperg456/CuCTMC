@@ -83,3 +83,4 @@ Testing/
 # user
 .vscode/
 .DS_store
+.csv

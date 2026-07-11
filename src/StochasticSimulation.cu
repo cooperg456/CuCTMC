@@ -7,33 +7,43 @@
 #include "curand_kernel.h"
 
 __global__
-void cuSSA(int reactants, int reactions, int paths, 
-    int steps, double* d_rates, int* d_alpha, int* d_trans, 
-    int* d_conds,  double* d_times, int* d_paths) {
+void cuSSA(int reactants, int reactions, int paths, int savedPaths,
+           double tGrid, double tMax, double* d_rates, int* d_alpha, 
+           int* d_trans, int* d_conds,  double* d_times, int* d_paths) {
+    //  thread indexing
 
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     int stride = blockDim.x * gridDim.x;
 
+    int pointsPerPath = tMax / tGrid + 1;
+
     for (int path = index; path < paths; path += stride) {
-            //  initialize cuRAND
+        //  initialize cuRAND
 
-            curandStatePhilox4_32_10 state;
-            curand_init(9384, path, 0, &state);
+        curandStatePhilox4_32_10 state;
+        curand_init(9384, path, 0, &state);
 
-            //  Initialize t = t0 and x = x0, set n = 0.
+        //  Initialize t = t0 and x = x0, set n = 0.
 
-            int x[MAX_SSA_REACTANTS];
+        int x[MAX_SSA_REACTANTS];
+        for (int i = 0; i < reactants; i++) {
+            x[i] = d_conds[i];
+        }
+        double t = 0;
+
+        //  record first n paths
+
+        int tSaved = 0;
+        if (path < savedPaths) {
             for (int i = 0; i < reactants; i++) {
-                x[i] = d_conds[i];
+                d_paths[(path * pointsPerPath * reactants) + i] = x[i];
             }
-            double t = 0;
+            d_times[path * pointsPerPath] = t;
+        }
 
-            for (int i = 0; i < reactants; i++) {
-                d_paths[(path * (steps + 1) * reactants) + i] = x[i];
-            }
-            d_times[path * (steps + 1)] = t;
+        //  while (t < tMax);
 
-        for (int n = 0; n < steps; n++) {
+        do {
             //  Compute a_j(x), j = 1, 2, ..., K and a_0(x).
 
             double a[MAX_SSA_REACTIONS];
@@ -80,14 +90,23 @@ void cuSSA(int reactants, int reactions, int paths,
                 }
                 t += tau;
             }
-
-            //  record data
-
-            for (int i = 0; i < reactants; i++) {
-                d_paths[(path * (steps + 1) * reactants) + ((n + 1) * reactants) + i] = x[i];
+            else {
+                t = tMax;
             }
-            d_times[path * (steps + 1) + (n + 1)] = t;
-        }
+
+            //  record first n paths
+
+            if (path < savedPaths) {
+                while (tSaved * tGrid < t && tSaved < pointsPerPath - 1) {
+                    tSaved++;
+                    
+                    for (int i = 0; i < reactants; i++) {
+                        d_paths[(path * pointsPerPath * reactants) + (tSaved * reactants) + i] = x[i];
+                    }
+                    d_times[path * pointsPerPath + tSaved] = tSaved * tGrid;
+                }
+            }
+        } while (t < tMax);
     }
 }
 
@@ -108,7 +127,7 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     int *d_initialConditions;
     int *d_samplePaths;
     
-    int n_timePoints = info.samplePaths * (info.maxSteps + 1);
+    int n_timePoints = info.savedPaths * (info.tMax / info.tGrid + 1);
     int n_initialConditions = info.initialConditions.size();
     int n_samplePaths = n_timePoints * n_initialConditions;
     
@@ -147,12 +166,12 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     cudaMemPrefetchAsync(d_samplePaths, n_samplePaths * sizeof(int), memlocDev, 0);
     
     //  kernel launch
-
+    
     int blockSize = 256;
     int numBlocks = (info.samplePaths + blockSize - 1) / blockSize;
     cuSSA<<<numBlocks, blockSize>>>(network.reactants.size(), network.reactions.size(), info.samplePaths, 
-                                    info.maxSteps, d_reactionRates,d_reactantCoefficients, d_transitionCoefficients, 
-                                    d_initialConditions, d_timePoints, d_samplePaths);
+                                    info.savedPaths, info.tGrid, info.tMax, d_reactionRates, d_reactantCoefficients, 
+                                    d_transitionCoefficients, d_initialConditions, d_timePoints, d_samplePaths);
                                 
     cudaDeviceSynchronize();
 
@@ -175,7 +194,8 @@ SSASimOutput::~SSASimOutput() {
 }
 
 void SSASimOutput::toCSV(const std::filesystem::path& csvFile) const {
-    int n_timePoints = info.samplePaths * (info.maxSteps + 1);
+    int pointsPerPath = info.tMax / info.tGrid + 1;
+    int n_timePoints = info.savedPaths * pointsPerPath;
     int n_initialConditions = info.initialConditions.size();
     int n_samplePaths = n_timePoints * n_initialConditions;
     
@@ -192,16 +212,16 @@ void SSASimOutput::toCSV(const std::filesystem::path& csvFile) const {
 
     //  get data
     
-    std::vector<std::vector<std::vector<int>>> paths(info.samplePaths, std::vector<std::vector<int>>(info.maxSteps + 1, std::vector<int>(network.reactants.size())));
-    std::vector<std::vector<double>> times(info.samplePaths, std::vector<double>(info.maxSteps + 1));
+    std::vector<std::vector<std::vector<int>>> paths(info.savedPaths, std::vector<std::vector<int>>(pointsPerPath, std::vector<int>(network.reactants.size())));
+    std::vector<std::vector<double>> times(info.savedPaths, std::vector<double>(pointsPerPath));
 
-    for (size_t path = 0; path < info.samplePaths; path++) {
-        for (size_t step = 0; step < (info.maxSteps + 1); step++) {
+    for (size_t path = 0; path < info.savedPaths; path++) {
+        for (size_t step = 0; step < pointsPerPath; step++) {
             memcpy(paths[path][step].data(),
-                d_samplePaths + (path * (info.maxSteps + 1) * network.reactants.size()) + (step * network.reactants.size()),
+                d_samplePaths + (path * pointsPerPath * network.reactants.size()) + (step * network.reactants.size()),
                 network.reactants.size() * sizeof(int));
         }
-        memcpy(times[path].data(), d_timePoints + (path * (info.maxSteps + 1)), (info.maxSteps + 1) * sizeof(double));
+        memcpy(times[path].data(), d_timePoints + (path * pointsPerPath), pointsPerPath * sizeof(double));
     }
 
     //  write data
@@ -210,15 +230,15 @@ void SSASimOutput::toCSV(const std::filesystem::path& csvFile) const {
     if (file.is_open()) {
         size_t reactants = info.initialConditions.size();
 
-        file << "path,step,time";
+        file << "path,time";
         for (size_t r = 0; r < reactants; r++) {
             file << ",reactant_" << r;
         }
         file << "\n";
 
-        for (size_t path = 0; path < info.samplePaths; path++) {
+        for (size_t path = 0; path < info.savedPaths; path++) {
             for (size_t step = 0; step < paths[path].size(); step++) {
-                file << path << "," << step << "," << times[path][step];
+                file << path << "," << times[path][step];
                 for (size_t r = 0; r < reactants; r++) {
                     file << "," << paths[path][step][r];
                 }

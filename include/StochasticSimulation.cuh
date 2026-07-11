@@ -13,7 +13,10 @@ struct SSASimInfo {
     //  sim parameters
 
     int samplePaths = 0;
-    int maxSteps = 0;
+    int savedPaths = 0;
+
+    double tGrid = 0;
+    double tMax = 0;
 };
 
 class SSASimOutput {    //  this class is poorly written. fix this later
