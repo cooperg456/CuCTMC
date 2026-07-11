@@ -123,13 +123,17 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
 
     //  SSASimInfo info
 
-    double *d_timePoints;
+    double *d_timePoints = nullptr;
     int *d_initialConditions;
-    int *d_samplePaths;
+    int *d_samplePaths = nullptr;
     
-    int n_timePoints = info.savedPaths * (info.tMax / info.tGrid + 1);
+    int n_timePoints;
     int n_initialConditions = info.initialConditions.size();
-    int n_samplePaths = n_timePoints * n_initialConditions;
+    int n_samplePaths;
+    if (info.savedPaths) {
+        n_timePoints = info.savedPaths * (info.tMax / info.tGrid + 1);
+        n_samplePaths = n_timePoints * n_initialConditions;
+    }
     
     //  malloc buffers
     
@@ -138,8 +142,10 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     cudaMallocManaged(&d_transitionCoefficients, n_transitionCoefficients * sizeof(int));
     cudaMallocManaged(&d_initialConditions, n_initialConditions * sizeof(int));
 
-    cudaMallocManaged(&d_timePoints, n_timePoints * sizeof(double));
-    cudaMallocManaged(&d_samplePaths, n_samplePaths * sizeof(int));
+    if (info.savedPaths) {
+        cudaMallocManaged(&d_timePoints, n_timePoints * sizeof(double));
+        cudaMallocManaged(&d_samplePaths, n_samplePaths * sizeof(int));
+    }
 
     //  memcpy to gpu
 
@@ -162,9 +168,11 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     cudaMemPrefetchAsync(d_transitionCoefficients, n_transitionCoefficients * sizeof(int), memlocDev, 0);
     cudaMemPrefetchAsync(d_initialConditions, n_initialConditions * sizeof(int), memlocDev, 0);
 
-    cudaMemPrefetchAsync(d_timePoints, n_timePoints * sizeof(double), memlocDev, 0);
-    cudaMemPrefetchAsync(d_samplePaths, n_samplePaths * sizeof(int), memlocDev, 0);
-    
+    if (info.savedPaths) {
+        cudaMemPrefetchAsync(d_timePoints, n_timePoints * sizeof(double), memlocDev, 0);
+        cudaMemPrefetchAsync(d_samplePaths, n_samplePaths * sizeof(int), memlocDev, 0);
+    }
+
     //  kernel launch
     
     int blockSize = 256;

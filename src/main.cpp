@@ -14,12 +14,8 @@ int main(int argc, char *argv[]) {
     SSASimInfo info{};
     info.initialConditions = {1000, 3, 0, 0};
     info.samplePaths = 256;
-    info.savedPaths = 16;
-    info.tGrid = 0.0001;
-    info.tMax = 50;
 
     SSASimOutput out = stochasticSimulation(network, info);
-    out.toCSV("output.csv");
 
     return 0;
 }
