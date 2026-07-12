@@ -6,10 +6,14 @@
 #include "cuda_runtime.h"
 #include "curand_kernel.h"
 
+__constant__ double d_rates[MAX_SSA_REACTIONS];
+__constant__ int d_alpha[MAX_SSA_REACTANTS * MAX_SSA_REACTIONS];
+__constant__ int d_trans[MAX_SSA_REACTANTS * MAX_SSA_REACTIONS];
+
 __global__
 void cuSSA(int reactants, int reactions, int paths, int savedPaths,
-           double tGrid, double tMax, double* d_rates, int* d_alpha, 
-           int* d_trans, int* d_conds,  double* d_times, int* d_paths) {
+           double tGrid, double tMax, int* d_conds,  
+           double* d_times, int* d_paths) {
     //  thread indexing
 
     int index = threadIdx.x + blockDim.x * blockIdx.x;
@@ -113,10 +117,6 @@ void cuSSA(int reactants, int reactions, int paths, int savedPaths,
 SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     //  ReactionNetwork info
 
-    double *d_reactionRates;
-    int *d_reactantCoefficients;
-    int *d_transitionCoefficients;
-
     int n_reactionRates = network.reactions.size();
     int n_reactantCoefficients = network.reactantCoefficients.size();
     int n_transitionCoefficients = network.transitionCoefficients.size();
@@ -137,10 +137,7 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     
     //  malloc buffers
     
-    cudaMallocManaged(&d_reactionRates, n_reactionRates * sizeof(double));
-    cudaMallocManaged(&d_reactantCoefficients, n_reactantCoefficients * sizeof(int));
-    cudaMallocManaged(&d_transitionCoefficients, n_transitionCoefficients * sizeof(int));
-    cudaMallocManaged(&d_initialConditions, n_initialConditions * sizeof(int));
+    cudaMalloc(&d_initialConditions, n_initialConditions * sizeof(int));
 
     if (info.savedPaths) {
         cudaMallocManaged(&d_timePoints, n_timePoints * sizeof(double));
@@ -149,10 +146,11 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
 
     //  memcpy to gpu
 
-    memcpy(d_reactionRates, network.reactionRates.data(), n_reactionRates * sizeof(double));
-    memcpy(d_reactantCoefficients, network.reactantCoefficients.data(), n_reactantCoefficients * sizeof(int));
-    memcpy(d_transitionCoefficients, network.transitionCoefficients.data(), n_transitionCoefficients * sizeof(int));
-    memcpy(d_initialConditions, info.initialConditions.data(), n_initialConditions * sizeof(int));
+    cudaMemcpyToSymbol(d_rates, network.reactionRates.data(), n_reactionRates * sizeof(double));
+    cudaMemcpyToSymbol(d_alpha, network.reactantCoefficients.data(), n_reactantCoefficients * sizeof(int));
+    cudaMemcpyToSymbol(d_trans, network.transitionCoefficients.data(), n_transitionCoefficients * sizeof(int));
+
+    cudaMemcpy(d_initialConditions, info.initialConditions.data(), n_initialConditions * sizeof(int), cudaMemcpyHostToDevice);
     
     //  prefetches
 
@@ -163,9 +161,6 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     memlocDev.id = device;
     memlocDev.type = cudaMemLocationTypeDevice;
 
-    cudaMemPrefetchAsync(d_reactionRates, n_reactionRates * sizeof(double), memlocDev, 0);
-    cudaMemPrefetchAsync(d_reactantCoefficients, n_reactantCoefficients * sizeof(int), memlocDev, 0);
-    cudaMemPrefetchAsync(d_transitionCoefficients, n_transitionCoefficients * sizeof(int), memlocDev, 0);
     cudaMemPrefetchAsync(d_initialConditions, n_initialConditions * sizeof(int), memlocDev, 0);
 
     if (info.savedPaths) {
@@ -178,16 +173,13 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     int blockSize = 256;
     int numBlocks = (info.samplePaths + blockSize - 1) / blockSize;
     cuSSA<<<numBlocks, blockSize>>>(network.reactants.size(), network.reactions.size(), info.samplePaths, 
-                                    info.savedPaths, info.tGrid, info.tMax, d_reactionRates, d_reactantCoefficients, 
-                                    d_transitionCoefficients, d_initialConditions, d_timePoints, d_samplePaths);
+                                    info.savedPaths, info.tGrid, info.tMax, d_initialConditions, 
+                                    d_timePoints, d_samplePaths);
                                 
     cudaDeviceSynchronize();
 
     //  free allocations
 
-    cudaFree(d_reactionRates);
-    cudaFree(d_reactantCoefficients);
-    cudaFree(d_transitionCoefficients);
     cudaFree(d_initialConditions);
 
     return SSASimOutput(d_timePoints, d_samplePaths, network, info);
