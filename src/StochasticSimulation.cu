@@ -6,20 +6,32 @@
 #include "cuda_runtime.h"
 #include "curand_kernel.h"
 
-__constant__ double d_rates[MAX_SSA_REACTIONS];
-__constant__ int d_alpha[MAX_SSA_REACTANTS * MAX_SSA_REACTIONS];
-__constant__ int d_trans[MAX_SSA_REACTANTS * MAX_SSA_REACTIONS];
-
 __global__
 void cuSSA(int reactants, int reactions, int paths, int savedPaths,
-           double tGrid, double tMax, int* d_conds,  
+           double tGrid, double tMax, int* d_conds, 
+           double* d_rates, int* d_alpha, int* d_trans,
            double* d_times, int* d_paths) {
-    //  thread indexing
-
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     int stride = blockDim.x * gridDim.x;
 
     int pointsPerPath = tMax / tGrid + 1;
+
+    //  shared memory
+
+    __shared__ double s_rates[MAX_SSA_REACTIONS];
+    __shared__ int s_alpha[MAX_SSA_REACTANTS * MAX_SSA_REACTIONS];
+    __shared__ int s_trans[MAX_SSA_REACTANTS * MAX_SSA_REACTIONS];
+
+    for (int i = threadIdx.x; i < reactions; i += blockDim.x) {
+        s_rates[i] = d_rates[blockIdx.x * reactions + i];
+    }
+
+    for (int i = threadIdx.x; i < reactants * reactions; i += blockDim.x) {
+        s_alpha[i] = d_alpha[blockIdx.x * reactants * reactions + i];
+        s_trans[i] = d_trans[blockIdx.x * reactants * reactions + i];
+    }
+
+    __syncthreads();
 
     for (int path = index; path < paths; path += stride) {
         //  initialize cuRAND
@@ -53,9 +65,9 @@ void cuSSA(int reactants, int reactions, int paths, int savedPaths,
             double a[MAX_SSA_REACTIONS];
             double a0 = 0;
             for (int j = 0; j < reactions; j++) {
-                a[j] = d_rates[j];
+                a[j] = s_rates[j];
                 for (int m = 0; m < reactants; m++) {
-                    int alpha_jm = d_alpha[j * reactants + m];
+                    int alpha_jm = s_alpha[j * reactants + m];
                     if (alpha_jm > 0) {
                         if (x[m] < alpha_jm) {
                             a[j] = 0.0;
@@ -90,7 +102,7 @@ void cuSSA(int reactants, int reactions, int paths, int savedPaths,
                 //  Increment t by τ and x by v_j
 
                 for (int i = 0; i < reactants; i++) {
-                    x[i] += d_trans[reactants * j + i];
+                    x[i] += s_trans[reactants * j + i];
                 }
                 t += tau;
             }
@@ -115,7 +127,14 @@ void cuSSA(int reactants, int reactions, int paths, int savedPaths,
 }
 
 SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
+    int blockSize = 32;
+    int numBlocks = (info.samplePaths + blockSize - 1) / blockSize;
+
     //  ReactionNetwork info
+
+    double *d_reactionRates;
+    int *d_reactantCoefficients;
+    int *d_transitionCoefficients;
 
     int n_reactionRates = network.reactions.size();
     int n_reactantCoefficients = network.reactantCoefficients.size();
@@ -137,20 +156,25 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     
     //  malloc buffers
     
-    cudaMalloc(&d_initialConditions, n_initialConditions * sizeof(int));
+    cudaMalloc(&d_reactionRates, numBlocks * n_reactionRates * sizeof(double));
+    cudaMalloc(&d_reactantCoefficients, numBlocks * n_reactantCoefficients * sizeof(int));
+    cudaMalloc(&d_transitionCoefficients, numBlocks * n_transitionCoefficients * sizeof(int));
 
     if (info.savedPaths) {
         cudaMallocManaged(&d_timePoints, n_timePoints * sizeof(double));
         cudaMallocManaged(&d_samplePaths, n_samplePaths * sizeof(int));
     }
+    cudaMalloc(&d_initialConditions, numBlocks * n_initialConditions * sizeof(int));
 
     //  memcpy to gpu
 
-    cudaMemcpyToSymbol(d_rates, network.reactionRates.data(), n_reactionRates * sizeof(double));
-    cudaMemcpyToSymbol(d_alpha, network.reactantCoefficients.data(), n_reactantCoefficients * sizeof(int));
-    cudaMemcpyToSymbol(d_trans, network.transitionCoefficients.data(), n_transitionCoefficients * sizeof(int));
+    for (int i = 0; i < numBlocks; i++) {
+        cudaMemcpy(d_reactionRates + n_reactionRates * i, network.reactionRates.data(), n_reactionRates * sizeof(double), cudaMemcpyHostToDevice);
 
-    cudaMemcpy(d_initialConditions, info.initialConditions.data(), n_initialConditions * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_reactantCoefficients + n_reactantCoefficients * i, network.reactantCoefficients.data(), n_reactantCoefficients * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_transitionCoefficients + n_transitionCoefficients * i, network.transitionCoefficients.data(), n_transitionCoefficients * sizeof(int), cudaMemcpyHostToDevice);
+        cudaMemcpy(d_initialConditions + n_initialConditions * i, info.initialConditions.data(), n_initialConditions * sizeof(int), cudaMemcpyHostToDevice);
+    }
     
     //  prefetches
 
@@ -161,6 +185,10 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     memlocDev.id = device;
     memlocDev.type = cudaMemLocationTypeDevice;
 
+    cudaMemPrefetchAsync(d_reactionRates, numBlocks * n_reactionRates * sizeof(int), memlocDev, 0);
+    cudaMemPrefetchAsync(d_reactantCoefficients, numBlocks * n_reactantCoefficients * sizeof(int), memlocDev, 0);
+    cudaMemPrefetchAsync(d_transitionCoefficients, numBlocks * n_transitionCoefficients * sizeof(int), memlocDev, 0);
+
     cudaMemPrefetchAsync(d_initialConditions, n_initialConditions * sizeof(int), memlocDev, 0);
 
     if (info.savedPaths) {
@@ -169,11 +197,10 @@ SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info) {
     }
 
     //  kernel launch
-    
-    int blockSize = 256;
-    int numBlocks = (info.samplePaths + blockSize - 1) / blockSize;
+
     cuSSA<<<numBlocks, blockSize>>>(network.reactants.size(), network.reactions.size(), info.samplePaths, 
                                     info.savedPaths, info.tGrid, info.tMax, d_initialConditions, 
+                                    d_reactionRates, d_reactantCoefficients, d_transitionCoefficients,
                                     d_timePoints, d_samplePaths);
                                 
     cudaDeviceSynchronize();

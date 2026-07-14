@@ -2,8 +2,8 @@
 
 #include "ReactionNetwork.hpp"
 
-#define MAX_SSA_REACTANTS 16    //  fix this later
-#define MAX_SSA_REACTIONS 16
+#define MAX_SSA_REACTANTS 60    //  sized for CUDA shared memory limits
+#define MAX_SSA_REACTIONS 96
 
 struct SSASimInfo {
     //  system parameters
