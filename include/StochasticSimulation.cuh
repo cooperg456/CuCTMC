@@ -4,34 +4,24 @@
 
 #define MAX_SSA_REACTANTS 60    //  sized for CUDA shared memory limits
 #define MAX_SSA_REACTIONS 96
+#define SSA_BLOCK_SIZE 32
+
+struct SSASysInfo {
+    std::vector<double> reactionRates{};
+    std::vector<int> initialConditions{};
+    std::vector<int> reactantCoefficients{};
+    std::vector<int> transitionCoefficients{};    
+};
 
 struct SSASimInfo {
-    //  system parameters
-
-    std::vector<int> initialConditions{};
-
-    //  sim parameters
-
-    int samplePaths = 0;
-    int savedPaths = 0;
-
-    double tGrid = 0;
     double tMax = 0;
+    int warps = 0;
+    
+    double tGrid = 0;
+    int savedPaths = 0;
+    std::filesystem::path outputDir{};
+
+    ReactionNetwork base{};
 };
 
-class SSASimOutput {    //  this class is poorly written. fix this later
-public:
-    SSASimOutput(double *timePoints, int *samplePaths, ReactionNetwork &network, SSASimInfo &simInfo);
-    ~SSASimOutput();
-
-    void toCSV(const std::filesystem::path& csvFile) const;
-
-private:
-    double *d_timePoints;
-    int *d_samplePaths;
-
-    ReactionNetwork &network;
-    SSASimInfo &info;
-};
-
-SSASimOutput stochasticSimulation(ReactionNetwork &network, SSASimInfo &info);
+void SSA(SSASimInfo simInfo, std::vector<SSASysInfo> &sysInfos);

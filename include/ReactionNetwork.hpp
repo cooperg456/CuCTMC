@@ -15,6 +15,12 @@ public:
     std::vector<std::string> reactions{};
 
     std::vector<double> reactionRates{};
+    std::vector<int> initialConditions{};
     std::vector<int> reactantCoefficients{};
     std::vector<int> transitionCoefficients{};
+
+    //  helpers
+
+    size_t getReactantIdx(std::string reactant);
+    size_t getReactionIdx(std::string reaction);
 };

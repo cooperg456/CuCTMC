@@ -5,6 +5,22 @@
 
 #include "nlohmann/json.hpp"
 
+size_t ReactionNetwork::getReactantIdx(std::string reactant) {
+    auto it = std::find(reactants.begin(), reactants.end(), reactant);
+    if (it == reactions.end()) {
+        throw std::runtime_error("Unknown reactant: " + reactant);
+    }
+    return std::distance(reactants.begin(), it);
+}
+
+size_t ReactionNetwork::getReactionIdx(std::string reaction) {
+    auto it = std::find(reactions.begin(), reactions.end(), reaction);
+    if (it == reactions.end()) {
+        throw std::runtime_error("Unknown reaction: " + reaction);
+    }
+    return std::distance(reactions.begin(), it);
+}
+
 ReactionNetwork::ReactionNetwork(const std::filesystem::path& jsonFile) {
     std::ifstream f(jsonFile);
 
@@ -20,10 +36,13 @@ ReactionNetwork::ReactionNetwork(const std::filesystem::path& jsonFile) {
     nlohmann::json network = nlohmann::json::parse(f);
     f.close();
 
+    //  process json object
+
     size_t n_reactants = network["reactants"].size();
     size_t n_reactions = network["reactions"].size();
 
     reactants = network["reactants"];
+    initialConditions = std::vector<int>(network["conditions"]);
 
     reactions.resize(n_reactions);
     reactionRates.resize(n_reactions);
@@ -35,17 +54,13 @@ ReactionNetwork::ReactionNetwork(const std::filesystem::path& jsonFile) {
         reactionRates[i] = network["reactions"][i]["rate"];
 
         for (auto& reactant : network["reactions"][i]["reactants"].items()) {
-            auto it = std::find(reactants.begin(), reactants.end(), reactant.key());
-            size_t j = std::distance(reactants.begin(), it);
-            
+            size_t j = getReactantIdx(reactant.key());
             reactantCoefficients[i * n_reactants + j] += (int)reactant.value();
             transitionCoefficients[i * n_reactants + j] -= (int)reactant.value();
         }
 
         for (auto& product : network["reactions"][i]["products"].items()) {
-            auto it = std::find(reactants.begin(), reactants.end(), product.key());
-            size_t j = std::distance(reactants.begin(), it);
-            
+            size_t j = getReactantIdx(product.key());
             transitionCoefficients[i * n_reactants + j] += (int)product.value();
         }
     }
